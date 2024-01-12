@@ -1,0 +1,179 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2709
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fnil\fcharset0 Menlo-Regular;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww28300\viewh14440\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 import numpy as np\
+import pytorch_lightning as pl\
+import tensorflow as tf\
+import tensorflow_addons as tfa\
+import pandas as pd\
+import TSFEDL.models_keras as TSFEDL\
+import matplotlib.pyplot as plt\
+import torch\
+import csv\
+import os\
+import glob\
+from sklearn.preprocessing import StandardScaler\
+import argparse\
+\
+\
+argParser = argparse.ArgumentParser()\
+argParser.add_argument(\'93\'97-n_month\'94, help=\'93Month\'94?)\
+argParser.add_argument("--n_input", help="Number of timesteps for input data")\
+argParser.add_argument("--n_output", help="Number of timesteps for output data")\
+argParser.add_argument("--batch_size", help="Batch_size", default=32)\
+argParser.add_argument("--n_epochs", help="Number of maximum epochs to run the deep learning models", default=150)\
+argParser.add_argument("--clase", help="Name of the target variable in the dataset",  default=".B03 Consumption kWh")\
+\
+args = argParser.parse_args()\
+print(args)\
+\
+\
+# dataset and figures paths for:\
+#       1) TESLA V100 (CPUs & GPUs UNED machine via VPN)\
+#       2) UBUNTU (local GPUs machine)\
+#       3) MAC M1 (local CPUs machine)\
+\
+#dataset_path = '/home/wrozas/1.0 Dataset/' # TESLA \
+dataset_path = '/home/wrozas/Insync/crozas2@alumno.uned.es/OneDrive Biz/3 Doctorado/0B. Papers & Thesis/00. Cornwall Dataset LEM Data & Analysis/1.0 Dataset/'# UBUNTU\
+#dataset_path = '/Users/wolframrozas/OneDrive - UNED/3 Doctorado/0B. Papers & Thesis/00. Cornwall Dataset LEM Data & Analysis/1.0 Dataset/'\
+\
+#figures_path = '/home/wrozas/2. Jupyter Notebooks/00. Cornwall LEM Notebooks/3. SLM/figures/' # TESLA \
+figures_path = '/home/wrozas/Insync/crozas2@alumno.uned.es/OneDrive Biz/3 Doctorado/0B. Papers & Thesis/00. Cornwall Dataset LEM Data & Analysis/2. Jupyter Notebooks/3. SLM/figures/'# UBUNTU\
+#figures_path = '/Users/wolframrozas/OneDrive - UNED/3 Doctorado/0B. Papers & Thesis/00. Cornwall Dataset LEM Data & Analysis/2. Jupyter Notebooks/3. SLM/figures/'\
+\
+#models_path = '/home/wrozas/2. Jupyter Notebooks/00. Cornwall LEM Notebooks/3. SLM/models/' # TESLA \
+models_path = '/home/wrozas/Insync/crozas2@alumno.uned.es/OneDrive Biz/3 Doctorado/0B. Papers & Thesis/00. Cornwall Dataset LEM Data & Analysis/2. Jupyter Notebooks/3. SLM/models/'# UBUNTU\
+#models_path = '/Users/wolframrozas/OneDrive - UNED/3 Doctorado/0B. Papers & Thesis/00. Cornwall Dataset LEM Data & Analysis/2. Jupyter Notebooks/3. SLM/models/'\
+\
+# Read the data:\
+df = pd.read_csv(dataset_path + 't_msb1m_month_\'92 + int(args.n_month) +\'92.csv', delimiter=';')\
+df.fillna(axis=1, value=0, inplace=True)\
+\
+# Convert columns to its datatype:\
+df['01.01 UNIT site'] = df['01.01 UNIT site'].astype(int)\
+df['hour'] = pd.to_datetime(df['hour'])\
+df['cluster'] = df['cluster'].astype(str)\
+for i in range(3, 43):\
+    df[df.columns[i]] = df[df.columns[i]].astype(float)\
+\
+\
+# Drop '.A*' columns:\
+drop_cols = ['.A01 Actual Saving of Solar PV + Battery \'a3',\
+ '.A02 Electricity Cost without Solar PV + Battery  \'a3',\
+ '.A03 Actual Savings kWh',\
+ '.A04 PV Output kWh',\
+ '.A05 Annual consumption per floor area kWh/m2',\
+ '.A06 Production/Consumption ratio (PCR)',\
+ '.A07 Production Surplus (PS) kWh',\
+ '.A08 Production Deficit (PD) kWh',\
+ '.A09 Production Surplus/Deficit ratio (PSDR)',\
+ '.A10 CO2Footprint kgCO2e',\
+ '.A11 Round Trip Efficiency (RTE%)',\
+ '.A12 Self-consumed Solar PV (SCPV) kWh',\
+ '.A13 Grid Import Cost Avoidance (GICA) \'a3',\
+ '.A14 Grid Export w/o BESS (GEPV) kWh',\
+ '.A15 Export Income from Solar PV (EIPV) \'a3',\
+ '.A16 Total Financial Value of Solar (TFV) \'a3',\
+ '.A17 CO2 Savings from PV kgCO2e',\
+ '.A18 BESS Uplift  kWh',\
+ '.A19 Export Income \'a3']\
+\
+df = df.drop(drop_cols, axis=1)\
+\
+# Drop 'hour' and 'cluster' columns as they are not useful for this problem. They are descriptive variables only.\
+df = df.drop('hour', axis=1)\
+df = df.drop('cluster', axis=1)\
+\
+\
+# NORMALIZACI\'d3N: Media 0, desviacion 1.\
+sc=StandardScaler()                    # Transformer is created\
+df_sc = sc.fit_transform(X=df)\
+df = pd.DataFrame(df_sc, columns = df.columns)\
+\
+\
+# Train, validation and testing are the whole data frame df\
+\
+num_samples = len(df)\
+train_data = df\
+val_data = df\
+test_data = df\
+\
+test_data = df.iloc[int(num_samples * (train_pct + validation_pct)):, :]                                # 10% test data\
+\
+INPUT_LENGTH = int(args.n_input)                     # get the last 24 hours for make the prediction\
+INPUT_VARIABLES = train_data.shape[1]\
+OUTPUT_STEPS = int(args.n_output)                      # predict only the next 3 hour(s)\
+OUTPUT_VARIABLES = 1                  # Number of variables (timeseries) to predict.\
+BATCH_SIZE = int(args.batch_size)\
+\
+# Split the dataset to create instances for deep learning in the following way for example:\
+# using data from t = [0,1,2,3,4]  ->  predict t = [5].   This is an instance. The next ones follow a sliding window approach:\
+# using data from t = [1,2,3,4,5]  ->  predict t = [6].\
+# using data from t = [2,3,4,5,6]  ->  predict t = [7].\
+# This is done the same way on the validation and test data.\
+\
+CLASS_NAME = args.clase  #'.B03 Consumption kWh'\
+\
+w1 = WindowGenerator(input_width=INPUT_LENGTH,\
+                     label_width=OUTPUT_STEPS,\
+                     shift=OUTPUT_STEPS,\
+                     train_df=train_data,\
+                     val_df=val_data,\
+                     test_df=test_data,\
+                     batch_size=BATCH_SIZE,\
+                     label_columns=[CLASS_NAME])\
+print(w1)\
+\
+# Compute the number of instances on each dataset:\
+train_examples = get_num_instances(w1.make_dataset(w1.train_df))\
+val_examples = get_num_instances(w1.make_dataset(w1.val_df))\
+test_examples = get_num_instances(w1.make_dataset(w1.test_df))\
+total_examples = train_examples + val_examples + test_examples\
+\
+print("Total number of examples:", total_examples)\
+print("Number of training examples:", train_examples)\
+print("Number of validation examples:", val_examples)\
+print("Number of test examples:", test_examples)\
+\
+\
+# Dictionary with all methods\
+    methods_dict = \{\
+        ##'ShiHaotian': TSFEDL.ShiHaotian(input_tensor=input, include_top=True),\
+        ##'YildirimOzal': TSFEDL.YildirimOzal(input_tensor=input, include_top=True),\
+        'OhShuLi': TSFEDL.OhShuLih(input_tensor=input, include_top=False),\
+        'KhanZulfiqar': TSFEDL.KhanZulfiqar(input_tensor=input, include_top=False),\
+        'ZhengZhenyu': TSFEDL.ZhengZhenyu(input_tensor=input, include_top=False),\
+        'WangKejun': TSFEDL.WangKejun(input_tensor=input, include_top=False),\
+        'KimTaeYoung': TSFEDL.KimTaeYoung(input_tensor=input, include_top=False),\
+        'GenMinxing': TSFEDL.GenMinxing(input_tensor=input, include_top=False),\
+        'FuJiangmeng': TSFEDL.FuJiangmeng(input_tensor=input, include_top=False),\
+        ##'HuangMeiLing': TSFEDL.HuangMeiLing(input_tensor=input, include_top=True),\
+        'GaoJunLi': TSFEDL.GaoJunLi(input_tensor=input, include_top=False),\
+        ##'WeiXiaoyan': TSFEDL.WeiXiaoyan(input_tensor=input, include_top=True),\
+        'KongZhengmin': TSFEDL.KongZhengmin(input_tensor=input, include_top=False),\
+        'CaiWenjuan': TSFEDL.CaiWenjuan(input_tensor=input, include_top=False),\
+        'HtetMyetLynn': TSFEDL.HtetMyetLynn(input_tensor=input, include_top=False),\
+        ##'ZhangJin': TSFEDL.ZhangJin(input_tensor=input, include_top=True),\
+        ##'YaoQihang': TSFEDL.YaoQihang(input_tensor=input, include_top=True),\
+        ##'YiboGao': TSFEDL.YiboGao(input_tensor=input, include_top=True, return_loss=False),\
+        'SharPar': TSFEDL.SharPar(input_tensor=input, include_top=False),\
+        'DaiXiLi': TSFEDL.DaiXiLi(input_tensor=input, include_top=False),\
+    \}\
+\
+\
+# cargamos el modelo entrenado en una carpeta con nombre n\'ba de inputs y n\'ba de outputs.\
+loaded_model = tf.keras.models.load_model(f'./\{INPUT_LENGTH\}_\{OUTPUT_STEPS\}/\{name\}.h5')\
+\
+\
+# Ahora toca testear, como se ha guardado el mejor modelo gracias al EarlyStopping, lo cargamos y usamos los datos de test\
+\
+eval = loaded_model.evaluate(w1.test, verbose=0)\
+print(name, " MAE: ", eval[1])\
+results[name] = eval   # [ Loss, MAE, MSE, RMSE, R2 ]\
+\
+\
+}
